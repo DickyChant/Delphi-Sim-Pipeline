@@ -48,7 +48,18 @@ Each job now writes **two** ZEBRA/Fortran-binary files to the output dir:
 The two files are complementary — you want both for a complete refit.
 
 ### 🔄 Convert to ROOT
-Two options:
+Three options (the first is fadgen-direct, the other two go through the DST):
+- **`fadgen_to_root` (in this repo)** — a tiny standalone C++/ROOT tool that
+  reads `my_events.fadgen` directly and writes an RNTuple with the same
+  `GenPart_*` schema as the DST-level tools (18 fields incl. `GenPart_status`,
+  `GenPart_pdgId`, `GenPart_parentIdx`, `GenPart_firstChildIdx/lastChildIdx`,
+  `GenPart_fourMomentum`, `GenPart_mass`, `GenPart_vertex`, etc.). No DELPHI
+  libraries needed — just `root-config` on the PATH, so a sourced LCG view is
+  sufficient. Verified bit-identical to the DST round-trip on a 100-event
+  Z→bb sample. Build with `make fadgen_to_root` after sourcing LCG_107 or
+  LCG_109. Use this when you want truth *without* a detector-sim round-trip
+  (tagger development, dead-cone truth studies, etc.).
+
 - [delphi-nanoaod](https://github.com/jingyucms/delphi-nanoaod) — the
   SKELANA-based RNTuple writer, the standard path.
 - On the `feature/phdst-raw-reader` branch of that repo, the new

@@ -24,7 +24,16 @@ endif
 pythia8_generate: pythia8_generate.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LIBS)
 
+# fadgen -> ROOT RNTuple converter. Builds against the LCG view's ROOT
+# (root-config must be on PATH, e.g. after sourcing LCG_107 or LCG_109).
+# No DELPHI / SKELANA dependency -- pure ROOT.
+ROOT_CFLAGS = $(shell root-config --cflags)
+ROOT_LIBS   = $(shell root-config --libs) -lROOTNTuple -lGenVector
+
+fadgen_to_root: fadgen_to_root.cpp
+	$(CXX) -std=c++17 -O2 $(ROOT_CFLAGS) -o $@ $< $(ROOT_LIBS)
+
 clean:
-	rm -f pythia8_generate fort.26 *.fadgen
+	rm -f pythia8_generate fadgen_to_root fort.26 *.fadgen
 
 .PHONY: clean
