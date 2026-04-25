@@ -33,7 +33,12 @@ ROOT_LIBS   = $(shell root-config --libs) -lROOTNTuple -lGenVector
 fadgen_to_root: fadgen_to_root.cpp
 	$(CXX) -std=c++17 -O2 $(ROOT_CFLAGS) -o $@ $< $(ROOT_LIBS)
 
+# validate_genpart: read 1..N RNTuples with the GenPart_* schema, summarise
+# them, print the LUJETS event tree, and check pairwise bit-identity.
+validate_genpart: validate_genpart.cpp
+	$(CXX) -std=c++17 -O2 $(ROOT_CFLAGS) -o $@ $< $(ROOT_LIBS)
+
 clean:
-	rm -f pythia8_generate fadgen_to_root fort.26 *.fadgen
+	rm -f pythia8_generate fadgen_to_root validate_genpart fort.26 *.fadgen
 
 .PHONY: clean

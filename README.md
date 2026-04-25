@@ -60,6 +60,19 @@ Three options (the first is fadgen-direct, the other two go through the DST):
   LCG_109. Use this when you want truth *without* a detector-sim round-trip
   (tagger development, dead-cone truth studies, etc.).
 
+  Companion tool: `validate_genpart` (also in this repo, `make validate_genpart`)
+  reads 1..N RNTuples with the `GenPart_*` schema, prints a per-file summary
+  (mean particles / b-hadrons / leptons / photons per event), pretty-prints
+  the LUJETS event-record tree of one selected event from each, and — if more
+  than one file is given — pairwise checks that the (status, pdgId, parentIdx)
+  lists are bit-identical event-for-event. Typical use:
+
+  ```
+  ./validate_genpart gen_fadgen.root raw_sdst.root raw_fadana.root --max-depth 6
+  ```
+
+  ends with `OK: all pairs bit-identical.` if the three truth surfaces agree.
+
 - [delphi-nanoaod](https://github.com/jingyucms/delphi-nanoaod) — the
   SKELANA-based RNTuple writer, the standard path.
 - On the `feature/phdst-raw-reader` branch of that repo, the new
