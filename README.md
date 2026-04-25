@@ -35,9 +35,69 @@ Submit jobs with:
 
 ## 📂 Output Format
 
-- Output files are written in **`.sdst`** (Short DST) format  
-- Based on **ZEBRA** and stored as **Fortran binary**  
+Each job now writes **two** ZEBRA/Fortran-binary files to the output dir:
+
+- `simana_<job>.sdst` — DELPHI shortDST. Small (~150 kB / 30 events). Used by
+  standard DELPHI analyses; the SKELANA-based delphi-nanoaod consumes this.
+  Uniquely carries the **MVDH** VD-hit bank (event-level per-hit VD readout).
+- `simana_<job>.fadana` — DELPHI full-DST (DELANA output). Larger (~500 kB /
+  30 events) but carries the **per-track 3-D track elements** PA.TETP /
+  TEID / TEOD / TEFA / TEFB that the shortDST strips. Needed for any
+  hit-based refitting, particle-flow reconstruction, or alignment study.
+
+The two files are complementary — you want both for a complete refit.
 
 ### 🔄 Convert to ROOT
-For analysis, convert `.sdst` to **ROOT** format using the converter tool:  
-👉 [delphi-nanoaod](https://github.com/jingyucms/delphi-nanoaod)
+Three options (the first is fadgen-direct, the other two go through the DST):
+- **`fadgen_to_root` (in this repo)** — a tiny standalone C++/ROOT tool that
+  reads `my_events.fadgen` directly and writes an RNTuple with the same
+  `GenPart_*` schema as the DST-level tools (18 fields incl. `GenPart_status`,
+  `GenPart_pdgId`, `GenPart_parentIdx`, `GenPart_firstChildIdx/lastChildIdx`,
+  `GenPart_fourMomentum`, `GenPart_mass`, `GenPart_vertex`, etc.). No DELPHI
+  libraries needed — just `root-config` on the PATH, so a sourced LCG view is
+  sufficient. Verified bit-identical to the DST round-trip on a 100-event
+  Z→bb sample. Build with `make fadgen_to_root` after sourcing LCG_107 or
+  LCG_109. Use this when you want truth *without* a detector-sim round-trip
+  (tagger development, dead-cone truth studies, etc.).
+
+  Companion tool: `validate_genpart` (also in this repo, `make validate_genpart`)
+  reads 1..N RNTuples with the `GenPart_*` schema, prints a per-file summary
+  (mean particles / b-hadrons / leptons / photons per event), pretty-prints
+  the LUJETS event-record tree of one selected event from each, and — if more
+  than one file is given — pairwise checks that the (status, pdgId, parentIdx)
+  lists are bit-identical event-for-event. Typical use:
+
+  ```
+  ./validate_genpart gen_fadgen.root raw_sdst.root raw_fadana.root --max-depth 6
+  ```
+
+  ends with `OK: all pairs bit-identical.` if the three truth surfaces agree.
+
+- [delphi-nanoaod](https://github.com/jingyucms/delphi-nanoaod) — the
+  SKELANA-based RNTuple writer, the standard path.
+- On the `feature/phdst-raw-reader` branch of that repo, the new
+  `delphi-raw-nanoaod` executable walks the ZEBRA banks directly via PHDST
+  and emits calorimeter cells, VD hits, track-element 3-D points, raw
+  lepton-ID, beamspot, vertices, and the B field. Same RNTuple schema for
+  `.sdst` and `.fadana` inputs — which collections populate depends on the
+  file format. See `feature/phdst-raw-reader/delphi-raw-nanoaod/README.md`.
+
+---
+
+## 🐳 Local execution without CERN / Condor / Jingyu's image
+
+Branch `feature/cmssw-el9-base` adds `container/run_singularity.sh` — a wrapper
+that runs the full Pythia → DELSIM → DELANA → shortDST chain locally against
+a vanilla `docker.io/cmssw/el9:x86_64` singularity image, with CVMFS
+(`sft.cern.ch`, `delphi.cern.ch`) mounted at runtime and host
+`/lib64` bind-mounted at `/host_lib64` for libgfortran / libXm / libXp /
+libquadmath (which the `cmssw/el9` image does not ship). No CERN network,
+no Condor, no Jingyu's private container needed.
+
+Quickstart:
+```bash
+container/run_singularity.sh 200 smoketest /tmp/out config_z_tautau.txt
+# -> /tmp/out/simana_smoketest.sdst
+# -> /tmp/out/simana_smoketest.fadana
+```
+See `container/README.md` for the full prereq list.
