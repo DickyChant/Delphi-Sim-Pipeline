@@ -251,14 +251,24 @@ public:
             
             outfile.write(reinterpret_cast<const char*>(p_array), 5*4);
             
-            // V array as float32
+            // V array as float32. Production vertex of this particle in
+            // mm (Pythia's native unit), plus production time / proper
+            // lifetime in mm/c. With Beams:allowVertexSpread = on in the
+            // Pythia config the event interaction point is Gaussian-
+            // smeared by sigmaVertex{X,Y,Z}, and that smear flows into
+            // every particle's (xProd, yProd, zProd). DELSIM uses these
+            // as the start position when propagating particles through
+            // the detector, so the per-event truth PV is preserved
+            // through the simulation chain and recoverable downstream as
+            // GenPart_vertex (delphi-raw-nanoaod) for any particle that
+            // started at the interaction point.
             float v_array[5];
-            v_array[0] = 0.0f;  // Simplified vertex (set to origin)
-            v_array[1] = 0.0f;
-            v_array[2] = 0.0f;
-            v_array[3] = 0.0f;
-            v_array[4] = 0.0f;
-            
+            v_array[0] = static_cast<float>(p.xProd());
+            v_array[1] = static_cast<float>(p.yProd());
+            v_array[2] = static_cast<float>(p.zProd());
+            v_array[3] = static_cast<float>(p.tProd());
+            v_array[4] = static_cast<float>(p.tau());
+
             outfile.write(reinterpret_cast<const char*>(v_array), 5*4);
         }
         

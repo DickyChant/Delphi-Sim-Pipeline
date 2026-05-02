@@ -8,6 +8,16 @@ Beams:idA = 11          # Electron
 Beams:idB = -11         # Positron  
 Beams:eCM = 91.187      # Center-of-mass energy (GeV)
 
+# Per-event interaction-point smearing matched to the LEP1 pancake beam
+# (sigmas in mm). With this on every particle's (xProd, yProd, zProd) is
+# offset by the smeared event vertex; pythia8_generate writes those values
+# into fadgen v[0..2] for DELSIM to use, giving us a per-event MC-truth PV
+# recoverable downstream as GenPart_vertex.
+Beams:allowVertexSpread = on
+Beams:sigmaVertexX      = 0.150
+Beams:sigmaVertexY      = 0.010
+Beams:sigmaVertexZ      = 7.0
+
 # Process selection: Z boson production and decay
 WeakSingleBoson:ffbar2gmZ = on
 
