@@ -77,3 +77,28 @@ container/run_singularity.sh 200 smoketest /tmp/out config_z_tautau.txt
 # -> /tmp/out/simana_smoketest.fadana
 ```
 See `container/README.md` for the full prereq list.
+
+### Per-run beam-spot override (`feature/expose-truth-vertex`)
+
+DELSIM v94c hard-codes the BS centroid in `simqqbar.tit` (XYZP =
+(−0.10, 0, −0.80) cm); real-data 94c BS is at (−0.31, +0.15, −0.77) cm,
+so absolute-coord PV / track plots disagree between MC and data by
+~2 mm in xy. Set `BS_X / BS_Y / BS_Z` env vars (with optional
+`BS_SIGMA_*`) and DELSIM places events at the requested BS via a
+prerun → `sed XYZP/XYZW` → re-run `runsim` sequence:
+
+```bash
+# Match real-data run 46004 (Y13709.* nanoaods on EOS):
+BS_X=-0.3073 BS_Y=+0.1496 BS_Z=-0.7127 \
+  container/run_singularity.sh 100 mc_match /tmp/zbb \
+    config_z_bb.txt v94c 45.625 46004
+```
+
+Verified empirically: per-event BS in the resulting SDST matches the
+override to <2 µm in (x, y). DELSIM XYZP wins over DELANA's BEAX prior
+in the SDST BS bank. Full diagnosis: [`docs/bs-override.md`](docs/bs-override.md).
+Per-run BS table (26 runs from 94c Y13709): in
+[`delphi-improved-reco/diagnostics/bs_table_94c_Y13709.csv`](https://github.com/DickyChant/delphi-improve-reco/blob/feature/edm4hep-pipeline/diagnostics/bs_table_94c_Y13709.csv).
+Closure plot showing matched MC overlapping data on the absolute frame:
+slide 10 of [`delphi_improve_reco.pdf`](https://sqian.web.cern.ch/sqian/delphi_edm4hep/delphi_improve_reco.pdf)
+on EOS.
