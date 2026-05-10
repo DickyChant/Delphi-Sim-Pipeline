@@ -11,9 +11,22 @@
 #
 # Usage:
 #   ./run_singularity.sh <n_events> <job_id> <out_dir> <config_file>
+#                        [<delsim_version> <e_beam> <nrun>]
 #
 # Example:
 #   ./run_singularity.sh 200 smoketest /tmp/out ../config_z_tautau.txt
+#
+# Optional BS centroid override (env vars):
+#   BS_X, BS_Y, BS_Z (cm), BS_SIGMA_X, BS_SIGMA_Y, BS_SIGMA_Z (cm)
+#   When BS_X/Y/Z are set, DELSIM's XYZP/XYZW are overridden via a
+#   prerun-then-edit-then-rerun runsim sequence (see Stage 3 below).
+#   The BS bank in the resulting SDST will reflect the override
+#   (verified empirically: DELSIM XYZP wins over DELANA's BEAX prior
+#   in the SDST BS bank).
+#
+# Example matching real-data run 13709 (Y13709 nanoaods on EOS):
+#   BS_X=-0.306 BS_Y=+0.149 BS_Z=-0.770 \
+#     ./run_singularity.sh 100 mc /tmp/zbb ../config_z_bb.txt
 #
 # The wrapper handles:
 #   * pulling / caching the cmssw/el9 SIF on first run
@@ -29,6 +42,23 @@ OUT_DIR=${3:-$PWD/out}
 CONFIG_FILE=${4:-$PWD/../config_z_tautau.txt}
 DELSIM_VERSION=${5:-v94c}
 E_BEAM=${6:-45.625}
+NRUN=${7:-${NRUN:-3101}}
+# Optional BS centroid override. When set, DELSIM's XYZP/XYZW cards in
+# simqqbar.tit are patched to these values via runsim -STITL. Empirically
+# the override propagates straight to the SDST BS bank (DELSIM's per-event
+# truth IP wins over DELANA's BEAX prior). The two-step prerun-then-edit
+# approach is required because runsim's -STITL doesn't substitute
+# {nrun}/IGENER placeholders — see Stage 3 below.
+#
+# Default: keep the v94c-period values from simqqbar.tit, no override.
+# To match real-data run 13709 (Y13709 nanoaods on EOS):
+#   BS_X=-0.306 BS_Y=+0.149 BS_Z=-0.770 ./run_singularity.sh ...
+BS_X=${BS_X:-}
+BS_Y=${BS_Y:-}
+BS_Z=${BS_Z:-}
+BS_SIGMA_X=${BS_SIGMA_X:-0.012}
+BS_SIGMA_Y=${BS_SIGMA_Y:-0.0005}
+BS_SIGMA_Z=${BS_SIGMA_Z:-0.740}
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$HERE/.." && pwd)"
@@ -82,22 +112,66 @@ singularity exec --cleanenv --bind /cvmfs --bind "$WORK:/work" "${BIND_LIBS[@]}"
     " | tail -40
 mv "$WORK/fort.26" "$WORK/my_events.fadgen"
 
-echo "=== Stage 3: DELSIM (runsim $DELSIM_VERSION NRUN=3101 EBEAM=$E_BEAM N=$N_EVENTS) ==="
-singularity exec --cleanenv --bind /cvmfs --bind "$WORK:/work" "${BIND_LIBS[@]}" \
-    "$IMAGE" bash -c "
-        set +u
-        source /cvmfs/delphi.cern.ch/setup.sh > /dev/null 2>&1
-        # /eos/opendata/delphi is not reachable outside CERN; CVMFS carries the
-        # same condition data. Override the defaults.
-        export DELPHI_DDB=/cvmfs/delphi.cern.ch/condition-data
-        export DELPHI_DATA_ROOT=/cvmfs/delphi.cern.ch
-        # Host /lib64 bound at /host_lib64; expose it to ld.so only as a
-        # fallback path for names the container image does not ship.
-        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/host_lib64
-        cd /work
-        runsim -VERSION $DELSIM_VERSION -LABO CERN -NRUN 3101 -EBEAM $E_BEAM \\
-               -NEVMAX $N_EVENTS -gext my_events.fadgen
-    " | tail -40
+if [[ -n "$BS_X$BS_Y$BS_Z" ]]; then
+    : ${BS_X:?BS_X required if any of BS_Y/BS_Z is set}
+    : ${BS_Y:?BS_Y required if any of BS_X/BS_Z is set}
+    : ${BS_Z:?BS_Z required if any of BS_X/BS_Y is set}
+    echo "=== Stage 3: DELSIM (runsim $DELSIM_VERSION NRUN=$NRUN EBEAM=$E_BEAM N=$N_EVENTS) ==="
+    echo "             with BS override: ($BS_X, $BS_Y, $BS_Z) cm  ± ($BS_SIGMA_X, $BS_SIGMA_Y, $BS_SIGMA_Z)"
+    singularity exec --cleanenv --bind /cvmfs --bind "$WORK:/work" "${BIND_LIBS[@]}" \
+        "$IMAGE" bash -c "
+            set +u
+            source /cvmfs/delphi.cern.ch/setup.sh > /dev/null 2>&1
+            export DELPHI_DDB=/cvmfs/delphi.cern.ch/condition-data
+            export DELPHI_DATA_ROOT=/cvmfs/delphi.cern.ch
+            export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/host_lib64
+            cd /work
+
+            # Step A: prerun without -STITL to let runsim's MakeSimTitle
+            # substitute {nrun}, IGENER, ISEEDG/S, NEVMAX, etc. into a
+            # complete simlocal.title. We discard prerun outputs.
+            echo '--- Stage 3a: prerun (generate simlocal.title) ---'
+            runsim -VERSION $DELSIM_VERSION -LABO CERN -NRUN $NRUN -EBEAM $E_BEAM \\
+                   -NEVMAX $N_EVENTS -gext my_events.fadgen 2>&1 | tail -3
+            if [[ ! -f simlocal.title ]]; then
+                echo 'ERROR: prerun did not generate simlocal.title' >&2
+                exit 1
+            fi
+
+            # Step B: edit XYZP/XYZW into a copy.
+            cp simlocal.title simlocal_edit.title
+            sed -i \"s|^XYZP[[:space:]].*|XYZP    $BS_X $BS_Y $BS_Z|\"               simlocal_edit.title
+            sed -i \"s|^XYZW[[:space:]].*|XYZW    $BS_SIGMA_X $BS_SIGMA_Y $BS_SIGMA_Z|\" simlocal_edit.title
+            echo '--- BS override applied ---'
+            grep -E '^(XYZP|XYZW)[[:space:]]' simlocal_edit.title
+
+            # Step C: clean prerun artifacts and re-run with -STITL.
+            rm -f simana.fadsim simana.sdst simana.fadana FOR* fort.* simdec.data igtots.logn delsimrn.out88 scanlist.sumr T.FSEQ1 simlocal.title
+            ln -sf my_events.fadgen fort.18
+            echo '--- Stage 3b: main run with edited title ---'
+            runsim -VERSION $DELSIM_VERSION -LABO CERN -NRUN $NRUN -EBEAM $E_BEAM \\
+                   -NEVMAX $N_EVENTS -gext my_events.fadgen \\
+                   -STITL simlocal_edit.title
+        " | tail -40
+else
+    echo "=== Stage 3: DELSIM (runsim $DELSIM_VERSION NRUN=$NRUN EBEAM=$E_BEAM N=$N_EVENTS) ==="
+    echo "             default v94c BS centroid (no override)"
+    singularity exec --cleanenv --bind /cvmfs --bind "$WORK:/work" "${BIND_LIBS[@]}" \
+        "$IMAGE" bash -c "
+            set +u
+            source /cvmfs/delphi.cern.ch/setup.sh > /dev/null 2>&1
+            # /eos/opendata/delphi is not reachable outside CERN; CVMFS carries the
+            # same condition data. Override the defaults.
+            export DELPHI_DDB=/cvmfs/delphi.cern.ch/condition-data
+            export DELPHI_DATA_ROOT=/cvmfs/delphi.cern.ch
+            # Host /lib64 bound at /host_lib64; expose it to ld.so only as a
+            # fallback path for names the container image does not ship.
+            export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/host_lib64
+            cd /work
+            runsim -VERSION $DELSIM_VERSION -LABO CERN -NRUN $NRUN -EBEAM $E_BEAM \\
+                   -NEVMAX $N_EVENTS -gext my_events.fadgen
+        " | tail -40
+fi
 
 if [ -f "$WORK/simana.sdst" ]; then
     mv "$WORK/simana.sdst" "$OUT_DIR/simana_${JOB_ID}.sdst"
