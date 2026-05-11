@@ -21,3 +21,9 @@ test_kk2f_output/
 
 # Docker tar files
 *.tar
+
+# Python bytecode
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
