@@ -290,17 +290,28 @@ private:
 
 int main(int argc, char* argv[]) {
     // Parse command line arguments
-    int target_events = 20;  // Default value
+    int requested_events = 20;     // What the caller asked for
+    int target_events = 20;        // What we actually generate (with buffer)
     std::string config_file = "";  // Default: no config file
-    
+
+    // 5% buffer to absorb DELSIM event-level failures downstream. The
+    // caller passes the *requested* count on the CLI; we produce
+    // ceil(N * 1.05) here so that, after the ~1% DELSIM failure rate
+    // and the always-empty-first-event skip later in the pipeline,
+    // we still end up with >= N successful events.
+    constexpr double kPipelineBufferFraction = 0.05;
+
     // Parse arguments: [events] [config_file]
     if (argc > 1) {
-        target_events = std::atoi(argv[1]);
-        if (target_events <= 0) {
+        requested_events = std::atoi(argv[1]);
+        if (requested_events <= 0) {
             std::cerr << "Error: Number of events must be positive" << std::endl;
             std::cerr << "Usage: " << argv[0] << " [number_of_events] [config_file]" << std::endl;
             return 1;
         }
+        // ceil((1 + buffer) * N): never under, always at least one extra
+        target_events = static_cast<int>(
+            std::ceil((1.0 + kPipelineBufferFraction) * requested_events));
     }
     
     if (argc > 2) {
@@ -316,7 +327,9 @@ int main(int argc, char* argv[]) {
     std::cout << "PYTHIA 8 with Enhanced Event Validation" << std::endl;
     std::cout << "=======================================" << std::endl;
     std::cout << "Random seed: " << seed << std::endl;
-    std::cout << "Target events: " << target_events << std::endl;
+    std::cout << "Requested events: " << requested_events << std::endl;
+    std::cout << "Target events (with " << static_cast<int>(100*kPipelineBufferFraction)
+              << "% pipeline buffer): " << target_events << std::endl;
     if (!config_file.empty()) {
         std::cout << "Config file: " << config_file << std::endl;
     }
