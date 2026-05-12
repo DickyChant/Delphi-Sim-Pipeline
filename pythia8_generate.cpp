@@ -50,11 +50,18 @@ private:
             status = 21;
         }
         
-        // V0 handling
+        // V0 handling — match kk2f_fadgen_fixer.cpp isV0Particle().
+        // K0L (130) is detector-stable (ctau ~ 15.3 m, P(decay in tracker)
+        // ~1%) and must NOT be V0-tagged. Sigma+/- and Xi- have ctau of
+        // a few cm and DO need V0 treatment so DELSIM decays them.
         if (status == 1) {
             int abs_pdg = abs(pdg_id);
-            if (abs_pdg == 310 || abs_pdg == 130 ||
-                abs_pdg == 3122 || abs_pdg == 3322) {
+            if (abs_pdg == 310  ||   // K0_S
+                abs_pdg == 3122 ||   // Lambda
+                abs_pdg == 3112 ||   // Sigma-
+                abs_pdg == 3222 ||   // Sigma+
+                abs_pdg == 3312 ||   // Xi-
+                abs_pdg == 3322) {   // Xi0
                 return 4;
             }
         }
@@ -414,6 +421,22 @@ int main(int argc, char* argv[]) {
     // Disable Anti-Xi0 decay (PDG ID: -3322)
     pythia.readString("-3322:mayDecay = false");
     std::cout << "  Anti-Xi0 (-3322) decay disabled" << std::endl;
+
+    // Disable Sigma- decay (PDG ID: 3112) and its antiparticle.
+    // ctau ~ 4.4 cm — DELSIM resolves the displaced vertex, V0 reco wants it.
+    pythia.readString("3112:mayDecay = false");
+    pythia.readString("-3112:mayDecay = false");
+    std::cout << "  Sigma- (3112 / -3112) decay disabled" << std::endl;
+
+    // Disable Sigma+ decay (PDG ID: 3222) and its antiparticle. ctau ~ 2.4 cm.
+    pythia.readString("3222:mayDecay = false");
+    pythia.readString("-3222:mayDecay = false");
+    std::cout << "  Sigma+ (3222 / -3222) decay disabled" << std::endl;
+
+    // Disable Xi- decay (PDG ID: 3312) and its antiparticle. ctau ~ 4.9 cm.
+    pythia.readString("3312:mayDecay = false");
+    pythia.readString("-3312:mayDecay = false");
+    std::cout << "  Xi- (3312 / -3312) decay disabled" << std::endl;
     
     if (!pythia.init()) {
         std::cerr << "PYTHIA initialization failed!" << std::endl;
