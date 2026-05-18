@@ -313,12 +313,13 @@ int main(int argc, char* argv[]) {
     int target_events = 20;        // What we actually generate (with buffer)
     std::string config_file = "";  // Default: no config file
 
-    // 5% buffer to absorb DELSIM event-level failures downstream. The
+    // 10% buffer to absorb DELSIM event-level failures downstream. The
     // caller passes the *requested* count on the CLI; we produce
-    // ceil(N * 1.05) here so that, after the ~1% DELSIM failure rate
+    // ceil(N * 1.10) here so that, after the ~1% DELSIM failure rate
     // and the always-empty-first-event skip later in the pipeline,
-    // we still end up with >= N successful events.
-    constexpr double kPipelineBufferFraction = 0.05;
+    // we still end up with >= N successful events. Aligned with
+    // run_pipeline.sh's PYTHIA_BUFFER default (Jingyu 5c9a1b7f).
+    constexpr double kPipelineBufferFraction = 0.10;
 
     // Parse arguments: [events] [config_file]
     if (argc > 1) {
