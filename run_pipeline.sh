@@ -56,13 +56,44 @@ if ! command -v runsim &> /dev/null; then
 fi
 echo "✓ DELPHI environment configured, runsim found at: $(which runsim)"
 
-# Updated parameter handling with config file support
+# Updated parameter handling with config file support.
+# NUM_EVENTS is the DELSIM target. Pythia over-generates by PYTHIA_BUFFER
+# events (default = 10% of NUM_EVENTS, rounded up) so DELSIM still reaches
+# NEVMAX even if a handful of generator events are skipped — otherwise
+# runsim waits for events that never arrive and never exits.
 NUM_EVENTS=${1:-3000}
 JOB_ID=${2:-$(date +%Y%m%d_%H%M%S)}
 OUTPUT_DIR=${3:-/work/output}
 CONFIG_FILE=${4:-""}
 DELSIM_VERSION=${5:-"v94c"}
 E_BEAM=${6:-"45.625"}
+PYTHIA_BUFFER=${PYTHIA_BUFFER:-$(( (NUM_EVENTS + 9) / 10 ))}
+[ "$PYTHIA_BUFFER" -lt 1 ] && PYTHIA_BUFFER=1
+PYTHIA_EVENTS=$((NUM_EVENTS + PYTHIA_BUFFER))
+# Beam-spot override for DELSIM (XYZP centroid, XYZW widths, both in cm).
+# Per-period defaults from data BS measurements; widths converted µm -> cm:
+#   94c : centroid (-0.29911, 0.14225, -0.6121) cm
+#         widths   (105.2, 51.2, 1349.0) µm = (0.01052, 0.00512, 0.1349) cm
+#   95d : centroid (-0.32026, 0.11079, -0.7589) cm
+#         widths   (120.8, 121.9, 3010.2) µm = (0.01208, 0.01219, 0.30102) cm
+# Override per-job with XYZP / XYZW env vars.
+case "$DELSIM_VERSION" in
+    v94c)
+        XYZP_DEFAULT="-0.29911 0.14225 -0.6121"
+        XYZW_DEFAULT="0.01052 0.00512 0.1349"
+        ;;
+    v95d)
+        XYZP_DEFAULT="-0.32026 0.11079 -0.7589"
+        XYZW_DEFAULT="0.01208 0.01219 0.30102"
+        ;;
+    *)
+        echo "WARNING: no per-period BS defaults for DELSIM_VERSION=$DELSIM_VERSION; falling back to 94c values" >&2
+        XYZP_DEFAULT="-0.29911 0.14225 -0.6121"
+        XYZW_DEFAULT="0.01052 0.00512 0.1349"
+        ;;
+esac
+XYZP="${XYZP:-$XYZP_DEFAULT}"
+XYZW="${XYZW:-$XYZW_DEFAULT}"
 
 echo "DELSIM version: $DELSIM_VERSION"
 echo "Beam energy: $E_BEAM"
@@ -80,7 +111,7 @@ else
 fi
 
 echo "=== DELPHI-Pythia8 Pipeline Starting ==="
-echo "Events to generate: $NUM_EVENTS"
+echo "DELSIM target: $NUM_EVENTS events (Pythia generates $PYTHIA_EVENTS = +$PYTHIA_BUFFER buffer)"
 echo "Job ID: $JOB_ID"
 echo "Output directory: $OUTPUT_DIR"
 if [ -n "$CONFIG_FILE" ]; then
@@ -135,15 +166,15 @@ ls -la pythia8_generate
 echo "=== Starting Pythia ==="
 
 # Step 2: Generate events with optional config file
-echo "Step 2: Generating $NUM_EVENTS events..."
+echo "Step 2: Generating $PYTHIA_EVENTS events (DELSIM target $NUM_EVENTS + buffer $PYTHIA_BUFFER)..."
 if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
     echo "Using config file: $CONFIG_FILE"
     cat "$CONFIG_FILE"
     echo "--- End of config file ---"
-    ./pythia8_generate $NUM_EVENTS "$CONFIG_FILE"
+    ./pythia8_generate $PYTHIA_EVENTS "$CONFIG_FILE"
 else
     echo "Using default configuration"
-    ./pythia8_generate $NUM_EVENTS
+    ./pythia8_generate $PYTHIA_EVENTS
 fi
 
 # ADD DEBUGGING HERE:
@@ -176,16 +207,46 @@ mv fort.26 my_events.fadgen
 
 # Step 4: Run DELSIM simulation with variable NRUN
 echo "Step 4: Running DELSIM simulation..."
-# Calculate 90% of requested events for DELSIM to prevent hangs
-DELSIM_EVENTS=$((NUM_EVENTS * 90 / 100))
-# Ensure minimum of 1 event
+DELSIM_EVENTS=$NUM_EVENTS
 if [ $DELSIM_EVENTS -lt 1 ]; then
     DELSIM_EVENTS=1
 fi
 
-echo "Running DELSIM with $DELSIM_EVENTS events (90% of $NUM_EVENTS requested) and NRUN=$DELSIM_NRUN..."
-# Run runsim 
-runsim -VERSION $DELSIM_VERSION -LABO CERN -NRUN $DELSIM_NRUN -EBEAM $E_BEAM -NEVMAX $DELSIM_EVENTS -gext my_events.fadgen 
+echo "Running DELSIM with $DELSIM_EVENTS events (Pythia produced $PYTHIA_EVENTS) and NRUN=$DELSIM_NRUN..."
+if [ -n "$XYZP" ] || [ -n "$XYZW" ]; then
+    echo "  XYZP = $XYZP"
+    echo "  XYZW = $XYZW"
+    echo "  (BS-override mode: prerun -> edit simlocal.title -> re-run with -STITL)"
+    # Step A: prerun without -STITL so runsim's MakeSimTitle() can
+    # substitute its placeholders ({nrun}, IGENER, ISEEDG, NEVMAX, ...)
+    # into a complete simlocal.title. -STITL alone copies the raw
+    # template, leaves placeholders unfilled, and DELSIM ends up
+    # running its internal qq generator (IGENER=15, NEVMAX=450)
+    # instead of our fadgen input.
+    echo "--- Step 4a: prerun (generate simlocal.title) ---"
+    runsim -VERSION $DELSIM_VERSION -LABO CERN -NRUN $DELSIM_NRUN -EBEAM $E_BEAM -NEVMAX $DELSIM_EVENTS -gext my_events.fadgen 2>&1 | tail -3
+    if [ ! -f simlocal.title ]; then
+        echo "ERROR: prerun did not produce simlocal.title" >&2
+        exit 1
+    fi
+    # Step B: edit XYZP/XYZW into a copy of the resolved title.
+    cp simlocal.title simlocal_edit.title
+    [ -n "$XYZP" ] && sed -i "s|^XYZP[[:space:]].*|XYZP    $XYZP|" simlocal_edit.title
+    [ -n "$XYZW" ] && sed -i "s|^XYZW[[:space:]].*|XYZW    $XYZW|" simlocal_edit.title
+    echo "--- BS override applied ---"
+    grep -E '^(XYZP|XYZW)[[:space:]]' simlocal_edit.title
+    # Step C: clean prerun artifacts and re-run with -STITL.
+    rm -f simana.fadsim simana.sdst simana.fadana FOR* fort.* \
+          simdec.data igtots.logn delsimrn.out88 scanlist.sumr \
+          T.FSEQ1 simlocal.title
+    ln -sf my_events.fadgen fort.18
+    echo "--- Step 4b: main run with edited title ---"
+    runsim -VERSION $DELSIM_VERSION -LABO CERN -NRUN $DELSIM_NRUN -EBEAM $E_BEAM -NEVMAX $DELSIM_EVENTS -gext my_events.fadgen -STITL simlocal_edit.title
+else
+    echo "  (default v94c BS centroid -- no override)"
+    # Run runsim
+    runsim -VERSION $DELSIM_VERSION -LABO CERN -NRUN $DELSIM_NRUN -EBEAM $E_BEAM -NEVMAX $DELSIM_EVENTS -gext my_events.fadgen
+fi
 
 # Step 5: Collect outputs (move instead of copy to save disk space)
 echo "Step 5: Collecting outputs..."
@@ -218,8 +279,8 @@ else
     echo "  Pythia config: default"
 fi
 echo "  DELSIM NRUN: $DELSIM_NRUN"
-echo "  Events generated by Pythia: $NUM_EVENTS"
-echo "  Events processed by DELSIM: $DELSIM_EVENTS (80%)"
+echo "  Events generated by Pythia: $PYTHIA_EVENTS (target $NUM_EVENTS + buffer $PYTHIA_BUFFER)"
+echo "  Events processed by DELSIM: $DELSIM_EVENTS"
 echo "Output directory: $OUTPUT_DIR"
 echo "Files created:"
 ls -la "$OUTPUT_DIR"
