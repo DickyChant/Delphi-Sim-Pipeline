@@ -18,7 +18,11 @@ private:
     std::ofstream outfile;
     int events_written;
 
-    // This is temperary, might not be correct. 
+    // EvtGen leaves a decayed parent at negative Pythia status. This returns the
+    // base JETSET status map. The K=1+LUDECV external-decay experiment was
+    // reverted: it did not move reco B-daughter d0 toward truth (the residual is
+    // soft-track IP reconstruction, not the DELSIM decay vertex), and a K=1
+    // fadgen hangs the standard no-LUDECV DELSIM prerun. Decayed parents -> K=21.
     int convertToJetsetStatus(int pythia8_status, int pdg_id, int mother_id) {
         int status;
         
@@ -62,6 +66,7 @@ private:
             else if (pythia8_status >= 11 && pythia8_status <= 20) status = 11;
             else status = 21;
         } else {
+            // Decayed (negative Pythia status) -> K=21 (documentation).
             status = 21;
         }
         
@@ -260,7 +265,7 @@ public:
             std::pair<int,int> kd = findValidDaughters(idx);
             k[3] = kd.first;
             k[4] = kd.second;
-            
+
             outfile.write(reinterpret_cast<const char*>(k), 5*4);
             
             // P array as float32
@@ -477,6 +482,29 @@ int main(int argc, char* argv[]) {
             std::string pdl = pdlEnv ? pdlEnv
                 : "/cvmfs/sft.cern.ch/lcg/views/LCG_109/x86_64-el9-gcc13-opt/share/EvtGen/evt.pdl";
             evtgen = new EvtGenDecays(&pythia, dec, pdl);
+            // Keep the long-lived V0s STABLE in EvtGen so DELSIM decays them
+            // (it resolves their displaced vertex; V0 reco needs it). The
+            // mayDecay=false block above only stops PYTHIA; EvtGen decays a V0
+            // produced INSIDE a heavy-flavour chain (B/D -> K0S/Lambda -> ...)
+            // as part of that chain, at 2-76 cm in the TPC. exclude() can't
+            // reach a mid-chain particle (it only filters top-level isFinal).
+            // Overriding each V0 with an EMPTY decay block (0 modes) makes
+            // EvtGen treat it as stable everywhere (EvtGen.h updateData: a
+            // 0-mode particle is skipped; generateDecay leaves it final). EvtGen
+            // still decays every b/c-hadron and tau — Sigma0 (EM, prompt) and
+            // the _b/_c baryons are deliberately NOT listed.
+            {
+                const std::string v0dec = "evtgen_v0_stable.dec";
+                std::ofstream df(v0dec);
+                df << "# auto-generated: V0s left stable for DELSIM\n";
+                for (const char* nm : {"K_S0","K_L0","Lambda0","anti-Lambda0",
+                        "Sigma+","anti-Sigma-","Sigma-","anti-Sigma+",
+                        "Xi0","anti-Xi0","Xi-","anti-Xi+","Omega-","anti-Omega+"})
+                    df << "Decay " << nm << "\nEnddecay\n";
+                df << "End\n";
+                df.close();
+                evtgen->readDecayFile(v0dec);
+            }
             std::cout << "=== EvtGen heavy-flavour decays ENABLED ===" << std::endl
                       << "    DECAY: " << dec << std::endl
                       << "    PDL:   " << pdl << std::endl;
