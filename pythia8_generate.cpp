@@ -1,4 +1,7 @@
 #include "Pythia8/Pythia.h"
+#ifdef USE_EVTGEN
+#include "Pythia8Plugins/EvtGen.h"   // Pythia8<->EvtGen interface (ships with Pythia8)
+#endif
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -456,8 +459,33 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     
+#ifdef USE_EVTGEN
+    // Optional modern heavy-flavour decays via EvtGen (runtime switch
+    // EVTGEN_DECAY=1). EvtGenDecays' updateData() sets mayDecay=off for every
+    // b/c hadron it handles, so Pythia leaves them final and EvtGen decays them
+    // with modern form factors + current PDG tables; the daughters are appended
+    // to pythia.event and flow into fort.26 -> DELSIM exactly as Pythia's own
+    // decays do. Tables overridable via EVTGEN_DECAY_FILE / EVTGEN_PDL_FILE.
+    EvtGenDecays* evtgen = nullptr;
+    {
+        const char* ev = std::getenv("EVTGEN_DECAY");
+        if (ev && std::string(ev) == "1") {
+            const char* decEnv = std::getenv("EVTGEN_DECAY_FILE");
+            const char* pdlEnv = std::getenv("EVTGEN_PDL_FILE");
+            std::string dec = decEnv ? decEnv
+                : "/cvmfs/sft.cern.ch/lcg/views/LCG_109/x86_64-el9-gcc13-opt/share/EvtGen/DECAY.DEC";
+            std::string pdl = pdlEnv ? pdlEnv
+                : "/cvmfs/sft.cern.ch/lcg/views/LCG_109/x86_64-el9-gcc13-opt/share/EvtGen/evt.pdl";
+            evtgen = new EvtGenDecays(&pythia, dec, pdl);
+            std::cout << "=== EvtGen heavy-flavour decays ENABLED ===" << std::endl
+                      << "    DECAY: " << dec << std::endl
+                      << "    PDL:   " << pdl << std::endl;
+        }
+    }
+#endif
+
     EventWriter writer("fort.26");
-    
+
     int events_generated = 0;  // Count how many PYTHIA generated
     int events_accepted = 0;   // Count how many we accepted
     int max_attempts = target_events * 3;  // Maximum attempts
@@ -471,7 +499,9 @@ int main(int argc, char* argv[]) {
         }
         
         events_generated++;
-        
+#ifdef USE_EVTGEN
+        if (evtgen) evtgen->decay();   // modern EvtGen b/c-hadron decays in-place
+#endif
         if (writer.writeEvent(pythia.event, events_generated)) {
             events_accepted++;
         }

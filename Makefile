@@ -20,6 +20,20 @@ else
     LIBS = $(shell pythia8-config --ldflags) -lpythia8
 endif
 
+# Optional: modern heavy-flavour decays via EvtGen (`make EVTGEN=1`).
+# EvtGen + the Pythia8<->EvtGen header ship in the same LCG view as Pythia8,
+# so headers come from `pythia8-config --cflags` (the view include dir) and the
+# libs are in the view's lib64, derived from pythia8-config's own location
+# (no hard-coded view path). EvtGen needs >= c++17, so bump the standard.
+EVTGEN ?= 0
+ifeq ($(EVTGEN),1)
+    CXXFLAGS := $(filter-out -std=c++11,$(CXXFLAGS)) -std=c++17 -DUSE_EVTGEN
+    # pythia8-config --cflags also injects -std=c++11; drop it so c++17 wins.
+    INCLUDES := $(filter-out -std=c++11,$(INCLUDES))
+    EVTGEN_LIBDIR := $(abspath $(dir $(shell command -v pythia8-config))/../lib64)
+    LIBS += -L$(EVTGEN_LIBDIR) -lEvtGen -lEvtGenExternal
+endif
+
 # Target
 pythia8_generate: pythia8_generate.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LIBS)
