@@ -14,6 +14,12 @@ def as_bool(value):
     return value.lower() in ("1", "true", "yes", "on")
 
 
+def podio_input_tag(collection):
+    # Input podio collection names containing underscores are reversibly
+    # encoded when DelphiSource registers them with the framework.
+    return cms.InputTag("c4hPodioEncoded" + collection.encode().hex())
+
+
 process = cms.Process("DELPHI")
 process.source = cms.Source(
     "DelphiSource",
@@ -31,8 +37,13 @@ process.maxEvents = cms.untracked.PSet(
     input=cms.untracked.int32(int(os.environ.get("DELPHI_MAX_EVENTS", "-1")))
 )
 process.options = cms.untracked.PSet(numberOfThreads=cms.untracked.uint32(1))
+process.delphiEventSummary = cms.EDProducer(
+    "delphi_edm4hep::DelphiEventSummaryProducer",
+    chargeCodes=podio_input_tag("sDST_MAIN_Particles_ChargeCode"),
+)
 process.output = cms.OutputModule(
     "PodioOutputModule",
     fileName=cms.untracked.string(required("DELPHI_OUTPUT")),
 )
+process.native_reconstruction = cms.Path(process.delphiEventSummary)
 process.end = cms.EndPath(process.output)
