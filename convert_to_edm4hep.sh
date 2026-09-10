@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Convert a local or FATMEN-resolved DELPHI shortDST with delphi-edm4hep.
+# Convert a local or FATMEN-resolved DELPHI shortDST with delphiRun.
 
 set -euo pipefail
 
@@ -15,21 +15,25 @@ Input (exactly one):
 
 Options:
   --output FILE      output EDM4hep ROOT file
-  --edmbin DIR       directory containing delphi_sdst_pass and delphi_btag_check
+  --edmbin DIR       directory containing delphiRun and delphi_btag_check
                      (default: $DELPHI_EDM4HEP_BIN, or ../delphi-edm4hep-upstream-dev/build)
+  --config FILE      delphiRun Python configuration
+                     (default: steering/delphi_convert_cfg.py)
   --sample data|mc   checker run-sign contract (default: mc)
   -n, --max-events N
   --no-check         skip delphi_btag_check
   -h, --help
 
-The merged converter emits both stored BTG and recalculated AABTAG. There is
-no --btag mode in this interface.
+The native Code4hep source recalculates AABTAG by default and also preserves
+the stored BTG payload for comparison. There is no --btag mode in this
+interface.
 EOF
 }
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEFAULT_EDMBIN="$HERE/../delphi-edm4hep-upstream-dev/build"
 EDMBIN=${DELPHI_EDM4HEP_BIN:-$DEFAULT_EDMBIN}
+CONFIG=${DELPHI_RUN_CONFIG:-$HERE/steering/delphi_convert_cfg.py}
 INPUT_MODE=
 INPUT_VALUE=
 OUTPUT=
@@ -62,6 +66,11 @@ while (($#)); do
     --edmbin)
       (($# >= 2)) || { echo "error: --edmbin requires a value" >&2; exit 2; }
       EDMBIN=$2
+      shift 2
+      ;;
+    --config)
+      (($# >= 2)) || { echo "error: --config requires a value" >&2; exit 2; }
+      CONFIG=$2
       shift 2
       ;;
     --sample)
@@ -101,9 +110,10 @@ done
   exit 2
 }
 
-CONVERTER="$EDMBIN/delphi_sdst_pass"
+CONVERTER="$EDMBIN/delphiRun"
 CHECKER="$EDMBIN/delphi_btag_check"
-[[ -x $CONVERTER ]] || { echo "error: converter is not executable: $CONVERTER" >&2; exit 1; }
+[[ -x $CONVERTER ]] || { echo "error: launcher is not executable: $CONVERTER" >&2; exit 1; }
+[[ -s $CONFIG && -f $CONFIG ]] || { echo "error: configuration is not a nonempty regular file: $CONFIG" >&2; exit 1; }
 if ((RUN_CHECK)); then
   [[ -x $CHECKER ]] || { echo "error: checker is not executable: $CHECKER" >&2; exit 1; }
 fi
@@ -114,29 +124,46 @@ case $INPUT_MODE in
       echo "error: local input is not a nonempty regular file: $INPUT_VALUE" >&2
       exit 1
     }
-    INPUT_ARGS=("$INPUT_VALUE")
+    INPUT_VALUE=$(realpath "$INPUT_VALUE")
     ;;
   nickname)
     [[ -n $INPUT_VALUE ]] || { echo "error: nickname is empty" >&2; exit 2; }
-    INPUT_ARGS=(--nickname "$INPUT_VALUE")
     ;;
   pdl)
     [[ -s $INPUT_VALUE && -f $INPUT_VALUE ]] || {
       echo "error: PDL input is not a nonempty regular file: $INPUT_VALUE" >&2
       exit 1
     }
-    INPUT_ARGS=(--pdl "$INPUT_VALUE")
+    INPUT_VALUE=$(realpath "$INPUT_VALUE")
     ;;
 esac
 
 mkdir -p "$(dirname "$OUTPUT")"
-COMMAND=("$CONVERTER" "${INPUT_ARGS[@]}" "$OUTPUT")
-[[ -z $MAX_EVENTS ]] || COMMAND+=(-n "$MAX_EVENTS")
+OUTPUT_DIR=$(cd "$(dirname "$OUTPUT")" && pwd)
+OUTPUT="$OUTPUT_DIR/$(basename "$OUTPUT")"
+CONVERTER=$(realpath "$CONVERTER")
+CONFIG=$(realpath "$CONFIG")
+
+export DELPHI_INPUT="$INPUT_VALUE"
+export DELPHI_INPUT_MODE="$INPUT_MODE"
+[[ $DELPHI_INPUT_MODE == input ]] && export DELPHI_INPUT_MODE=file
+export DELPHI_OUTPUT="$OUTPUT"
+export DELPHI_CONVERSION_PASS=sdst
+export DELPHI_IS_REAL_DATA=false
+[[ $SAMPLE == data ]] && export DELPHI_IS_REAL_DATA=true
+export DELPHI_MAX_EVENTS=${MAX_EVENTS:--1}
+
+RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/delphiRun.XXXXXX")
+trap 'rm -rf "$RUNTIME_DIR"' EXIT
+COMMAND=("$CONVERTER" "$CONFIG")
 
 printf 'Running:'
 printf ' %q' "${COMMAND[@]}"
 printf '\n'
-"${COMMAND[@]}"
+(
+  cd "$RUNTIME_DIR"
+  "${COMMAND[@]}"
+)
 
 [[ -s $OUTPUT && -f $OUTPUT ]] || {
   echo "error: converter did not produce a nonempty regular file: $OUTPUT" >&2

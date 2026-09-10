@@ -745,9 +745,10 @@ It pulls `docker://jingyucms/delphi-sim:latest`, **verifies the baked artifacts*
 
 ### EDM4hep conversion and FATMEN inputs
 
-`convert_to_edm4hep.sh` is the pipeline entry point for the merged
-[`delphi-edm4hep`](https://github.com/delphi-fullDST-edm4hep/delphi-edm4hep)
-converter. It accepts exactly one of:
+`convert_to_edm4hep.sh` is the pipeline entry point for the native Code4hep
+`DelphiSource` and `delphiRun` launcher developed in
+[`delphi-edm4hep`](https://github.com/DickyChant/delphi-edm4hep). It accepts
+exactly one of:
 
 ```bash
 # A simulation shortDST produced by this repository
@@ -764,10 +765,12 @@ converter. It accepts exactly one of:
 ```
 
 Set `DELPHI_EDM4HEP_BIN` or pass `--edmbin` to select the directory containing
-`delphi_sdst_pass` and `delphi_btag_check`. The checker runs on every output by
-default. The merged converter always publishes both the stored BTG payload and
-the recalculated AABTAG payload; the old pipeline-specific `--btag recalc`
-steering is deliberately not exposed here.
+`delphiRun` and `delphi_btag_check`. The wrapper translates its input options to
+the environment consumed by `steering/delphi_convert_cfg.py` and runs the
+launcher in private scratch. The checker runs on every output by default. The
+native source recalculates AABTAG by default and also preserves the stored BTG
+payload for comparison; the old pipeline-specific `--btag recalc` steering is
+deliberately not exposed here.
 
 DELSIM/DELANA produce two complementary files per job; **you want both for a complete refit.**
 

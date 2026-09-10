@@ -17,12 +17,15 @@ class ConvertToEdm4hepTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        converter = self.bin / "delphi_sdst_pass"
+        converter = self.bin / "delphiRun"
         converter.write_text(
             "#!/bin/sh\n"
             "printf '%s\\n' \"$@\" >\"$FAKE_CONVERTER_ARGS\"\n"
-            "for arg do case \"$arg\" in *.root) output=$arg;; esac; done\n"
-            "printf output >\"$output\"\n"
+            "printf '%s\\n' \"$DELPHI_INPUT\" \"$DELPHI_INPUT_MODE\" "
+            "\"$DELPHI_OUTPUT\" \"$DELPHI_CONVERSION_PASS\" "
+            "\"$DELPHI_IS_REAL_DATA\" \"$DELPHI_MAX_EVENTS\" "
+            ">\"$FAKE_CONVERTER_ENV\"\n"
+            "printf output >\"$DELPHI_OUTPUT\"\n"
         )
         checker = self.bin / "delphi_btag_check"
         checker.write_text(
@@ -31,9 +34,11 @@ class ConvertToEdm4hepTest(unittest.TestCase):
         converter.chmod(0o755)
         checker.chmod(0o755)
         self.converter_args = self.root / "converter.args"
+        self.converter_env = self.root / "converter.env"
         self.checker_args = self.root / "checker.args"
         self.env = os.environ | {
             "FAKE_CONVERTER_ARGS": str(self.converter_args),
+            "FAKE_CONVERTER_ENV": str(self.converter_env),
             "FAKE_CHECKER_ARGS": str(self.checker_args),
         }
 
@@ -59,7 +64,11 @@ class ConvertToEdm4hepTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             self.converter_args.read_text().splitlines(),
-            [str(source), str(output), "-n", "7"],
+            [str(REPO / "steering" / "delphi_convert_cfg.py")],
+        )
+        self.assertEqual(
+            self.converter_env.read_text().splitlines(),
+            [str(source), "file", str(output), "sdst", "false", "7"],
         )
         self.assertEqual(
             self.checker_args.read_text().splitlines(),
@@ -74,8 +83,8 @@ class ConvertToEdm4hepTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            self.converter_args.read_text().splitlines(),
-            ["--nickname", "short94_c2/c1-10", str(output)],
+            self.converter_env.read_text().splitlines(),
+            ["short94_c2/c1-10", "nickname", str(output), "sdst", "false", "-1"],
         )
 
     def test_pdl_routes_to_converter(self) -> None:
@@ -87,9 +96,20 @@ class ConvertToEdm4hepTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            self.converter_args.read_text().splitlines(),
-            ["--pdl", str(pdl), str(output)],
+            self.converter_env.read_text().splitlines(),
+            [str(pdl), "pdl", str(output), "sdst", "false", "-1"],
         )
+
+    def test_data_sample_sets_real_data(self) -> None:
+        source = self.root / "simana.sdst"
+        source.write_text("sdst")
+        output = self.root / "data.root"
+        result = self.run_script(
+            "--input", str(source), "--output", str(output),
+            "--sample", "data", "--no-check",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.converter_env.read_text().splitlines()[4], "true")
 
     def test_rejects_multiple_input_modes(self) -> None:
         source = self.root / "simana.sdst"
